@@ -1,0 +1,62 @@
+{
+  "name": "brahmastra-ddos",
+  "version": "2.0.0",
+  "description": "Advanced DDoS tool with Tor circuit support, demo mode, and enhanced features",
+  "main": "Brahmastra-DDos.js",
+  "scripts": {
+    "start": "node Brahmastra-DDos.js",
+    "demo": "node Brahmastra-DDos.js https://example.com 5 8 1 proxy.txt demo",
+    "demo-tor": "node Brahmastra-DDos.js https://example.com 5 8 1 proxy.txt demo --tor",
+    "tor": "node Brahmastra-DDos.js https://example.com 5 8 1 proxy.txt --tor",
+    "show-tor-ip": "node Brahmastra-DDos.js --tor --show-tor-ip",
+    "test": "node Brahmastra-DDos.js --help",
+    "version": "node Brahmastra-DDos.js --version",
+    "update": "npm update && npm audit fix",
+    "clean": "node -e \"console.log('Cleaning proxy files...'); require('fs').unlinkSync('proxy.txt'); console.log('Proxy files cleaned.');\""
+  },
+  "keywords": [
+    "ddos",
+    "tor",
+    "circuit",
+    "network",
+    "security",
+    "testing",
+    "penetration-testing",
+    "network-analysis",
+    "cybersecurity"
+  ],
+  "author": "Brahmastra Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/brahmastra-team/brahmastra-ddos.git"
+  },
+  "bugs": {
+    "url": "https://github.com/brahmastra-team/brahmastra-ddos/issues"
+  },
+  "homepage": "https://github.com/brahmastra-team/brahmastra-ddos#readme",
+  "dependencies": {
+    "axios": "^1.11.0",
+    "socks-proxy-agent": "^8.0.5",
+    "user-agents": "^1.1.628",
+    "chalk": "^5.3.0",
+    "commander": "^12.0.0",
+    "ora": "^8.0.1",
+    "cli-table3": "^0.6.3"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "os": [
+    "win32",
+    "linux",
+    "darwin"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ]
+}
