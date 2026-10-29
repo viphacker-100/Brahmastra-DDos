@@ -15,7 +15,29 @@ All major issues have been resolved and the project is now in a stable, producti
 
 ## 🚀 Recent Major Upgrades
 
-### 🔧 **Critical Bug Fixes (v2.0.0)**
+### 🛡️ **Stability Hardening (Latest Update)**
+
+#### 1. **Tor Pre-flight Check**
+**Problem**: The tool silently proceeded with `--tor` even when the Tor daemon was not running
+**Solution**: Start-up probe of SOCKS 9050 (fallback 9150) with clear instructions and immediate exit
+**Impact**: No more timeouts and failed requests when Tor is off
+
+#### 2. **Real Circuit Rotation (NEWNYM)**
+**Problem**: Rotation only cleared cached agents locally - the exit IP never changed
+**Solution**: `SIGNAL NEWNYM` over Tor control port 9051 (Tor Browser 9151 fallback), socket cycling fallback without spam
+**Impact**: Working rotation; one clean log per rotation interval
+
+#### 3. **Fast-fail Tor IP Check**
+**Problem**: 9 doomed attempts (3 services x 3 retries) when Tor was down
+**Solution**: Immediate abort with an actionable error on ECONNREFUSED
+**Impact**: Quick, honest feedback; still tests all services when services themselves are slow
+
+#### 4. **Argument Parsing Hardening**
+**Problem**: crash in standalone mode `--tor --show-tor-ip` + case sensitivity for single-dash flags + proxy file crash on typo
+**Solution**: Standalone flag-only mode; normalization of `-xxx` to `--xxx`; graceful proxy file validation
+**Impact**: robust CLI experience + diagnostics reproduction to `tor-debug.log`
+
+### 🔧 **v2.0.0 Bug Fixes**
 
 #### 1. **`randomHeaders` Not Defined Error**
 **Problem**: Variable hoisting issue causing runtime crashes

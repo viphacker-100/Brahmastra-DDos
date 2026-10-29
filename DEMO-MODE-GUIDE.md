@@ -34,6 +34,17 @@ node Brahmastra-DDos.js https://example.com 5 8 1 proxy.txt --demo --tor
 node Brahmastra-DDos.js https://example.com 10 16 2 proxy.txt --demo --tor --tor-rotate=60
 ```
 
+### Single-dash flags are also accepted
+```bash
+# Equivalent to --demo --tor
+node Brahmastra-DDos.js https://example.com 5 8 1 proxy.txt -demo -tor
+```
+
+### Proxy file validation
+Demo mode (and all other modes) require an existing, non-empty proxy file argument:
+- Missing file -> `Cannot read proxy file '...': ENOENT` and exit code 1
+- Empty file -> `Proxy file '...' is empty - nothing to load` and exit code 1
+
 ## 📊 Demo Mode Features
 
 ### 🎭 **Simulation Capabilities**

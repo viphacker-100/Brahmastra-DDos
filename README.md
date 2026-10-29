@@ -26,6 +26,10 @@ A powerful and feature-rich DDoS tool with advanced capabilities including **Dem
 - **Demo Mode Stability** - Eliminated worker process errors and crashes
 - **Syntax Validation** - All code passes Node.js syntax checks
 - **Dependency Management** - Updated package.json with correct dependencies
+- **`url.parse()` Deprecation (DEP0169)** - Replaced with the WHATWG `URL` API
+- **Proxy File Errors** - Missing or empty proxy files now exit cleanly with a clear message instead of a crash traceback
+- **Multiline Titles** - Status monitor now extracts `<title>` blocks spanning multiple lines
+- **Tor IP Check Spam** - One fail-fast error instead of 9 doomed retries when Tor is unreachable
 
 ### 🆕 **New Features**
 - **Enhanced Error Handling** - Comprehensive error catching and logging
@@ -108,13 +112,17 @@ node Brahmastra-DDos.js --tor --show-tor-ip
 ```
 
 ### Tor Circuit Features
-- ✅ **SOCKS5 proxy** - Uses local Tor service (127.0.0.1:9050)
-- ✅ **Circuit rotation** - Automatic path changes every 30 seconds (configurable)
+- ✅ **Pre-flight check** - Fails fast with clear instructions if the Tor daemon is not running (auto-detects 9050 and Tor Browser's 9150)
+- ✅ **SOCKS5 proxy** - Uses local Tor service (127.0.0.1:9050) or Tor Browser (127.0.0.1:9150)
+- ✅ **Circuit rotation** - Force fresh exit circuits via Tor control port (`SIGNAL NEWNYM`), or socket cycling fallback
+- ✅ **Fast-fail IP check** - Single clear error instead of endless retries when Tor is unreachable
 - ✅ **Agent management** - Efficient connection pooling
 - ✅ **Demo integration** - Simulate circuit rotation in demo mode
 - ✅ **Status monitoring** - Track current circuit and rotation timing
 - ✅ **IP address display** - Show current Tor exit node IP address
 - ✅ **Multiple IP services** - Redundant IP checking for reliability
+
+> **Prerequisite:** Tor must be running before using `--tor` (e.g. `sudo apt-get install tor` then `tor`, or launch Tor Browser).
 
 ### Tor Circuit Output Example
 ```
@@ -122,7 +130,7 @@ node Brahmastra-DDos.js --tor --show-tor-ip
 [TOR CIRCUIT] (14:30:15) Proxy: socks5://127.0.0.1:9050
 [TOR CIRCUIT] (14:30:15) Rotation Interval: 30s
 [TOR CIRCUIT] (14:30:15) Circuit Rotation Interval: 30s
-[TOR CIRCUIT] (14:30:45) Rotated to Circuit 2
+[TOR CIRCUIT] (14:30:45) Rotated to fresh Tor exit circuit (NEWNYM) #2
 ```
 
 ## 📖 Usage
@@ -146,6 +154,26 @@ node Brahmastra-DDos.js <target> <time> <rate> <threads> <proxy.txt> [options]
 - **--tor-rotate=N** - Set Tor circuit rotation interval (seconds)
 - **--help, -h** - Show help message
 - **--version** - Show version information
+
+> **Flag note:** single-dash forms (`-demo`, `-tor`, `-show-tor-ip`, `-tor-rotate=N`) are accepted automatically and treated the same as the double-dash variants.
+
+### Standalone Tor IP Check
+Run an IP check without starting an attack - only flags are required:
+
+```bash
+node Brahmastra-DDos.js --tor --show-tor-ip
+```
+
+Tor up: prints your current exit node IP and exits. Tor down: prints a clear error and exits with code 1. Every run is also mirrored to `tor-debug.log` for diagnostics.
+
+### Troubleshooting
+
+| Symptom | Meaning | Fix |
+| --- | --- | --- |
+| `connect ECONNREFUSED 127.0.0.1:9050` | Tor daemon is not running | `sudo apt-get install tor && tor` or open Tor Browser |
+| `Could not signal NEWNYM via control ports 9051/9151` | Control port disabled | Add `ControlPort 9051` + `CookieAuthentication 0` to torrc |
+| `Cannot read proxy file ... ENOENT` | Proxy file path wrong | Fix the path or create the file |
+| Exit IP never changes | Same circuit reused | Enable the control port (see above) or wait for Tor's own rotation |
 
 ### Examples
 
@@ -190,6 +218,7 @@ node Brahmastra-DDos.js https://example.com 300 50 2 proxy.txt
 ### Prerequisites
 - Node.js 14.0.0 or higher
 - npm or yarn package manager
+- (Tor mode only) a running Tor daemon - `sudo apt-get install tor` or Tor Browser
 
 ### Setup
 ```bash
@@ -212,7 +241,7 @@ The project uses the following key dependencies:
 ## 🔧 Configuration
 
 ### Proxy Files
-Place your proxy lists in text files (one proxy per line):
+Place your proxy lists in text files (one proxy per line, blank lines are ignored):
 ```
 ip1:port1
 ip2:port2
@@ -221,9 +250,11 @@ ip3:port3
 
 ### Tor Configuration
 The tool automatically detects and uses:
-- **SOCKS5 Proxy**: `127.0.0.1:9050` (default Tor port)
-- **Circuit Rotation**: Every 30 seconds (configurable)
+- **SOCKS5 Proxy**: `127.0.0.1:9050` (default Tor port) with automatic fallback to Tor Browser's `127.0.0.1:9150`
+- **Control Ports**: probed at `9051` then `9151` (Tor Browser) for NEWNYM circuit rotation
+- **Circuit Rotation**: Every 30 seconds (configurable via `--tor-rotate=N`)
 - **Max Circuits**: 10 concurrent circuits
+- Without a reachable control port, rotation falls back to socket cycling (a single info line per rotation interval)
 
 ### Header Configuration
 The tool includes comprehensive header arrays for:

@@ -4,6 +4,16 @@
 
 Successfully implemented **Tor Circuit Support** for the Brahmastra-DDos tool, providing anonymous routing capabilities with automatic circuit rotation. This feature enhances privacy and security by routing traffic through the Tor network.
 
+## 🛡️ Stability Hardening (Latest Update)
+
+- **Pre-flight check**: with `--tor`, the tool probes SOCKS `127.0.0.1:9050` (Tor Browser `:9150` as fallback) and refuses to start attacks when Tor is not running, printing clear instructions instead of doomed connection attempts
+- **Real circuit rotation**: `rotateCircuit()` sends `SIGNAL NEWNYM` over the Tor control port (`9051`, Tor Browser "`9151`" fallback probe) so the exit IP actually changes
+- **Graceful fallback**: without a reachable control port, rotation falls back to SOCKS socket cycling with a single info line per rotation interval (no warning spam - workers refresh silently, only the master logs)
+- **Fast-fail IP check**: `getTorIP()` aborts immediately on `ECONNECTREFUSED` instead of retrying 3 services x 3 attempts each
+- **Standalone mode**: `node Brahmastra-DDos.js --tor --show-tor-ip` (flags only, no attack args) prints the exit IP without touching the attack path; output is mirrored to `tor-debug.log`
+- **Flag normalization**: `-tor`, `-show-tor-ip`, `-demo`, `-tor-rotate=N` are accepted as the double-dash equivalents
+- **Tor Browser support**: automatic fallback for SOCKS (9050 -> 9150) and control (9051 -> 9151) ports
+
 ## ✨ Features Implemented
 
 ### 1. Tor Circuit Management
@@ -48,7 +58,13 @@ class TorCircuitManager {
     enable()           // Enable Tor circuit rotation
     disable()          // Disable Tor circuit rotation
     getCurrentAgent()  // Get current SOCKS agent
-    rotateCircuit()    // Rotate to next circuit
+    socksEndpoint()    // Parse host/port from the proxy URI
+    checkTorAvailable()// TCP probe of the SOCKS port
+    detectTorProxy()   // Auto-detect 9050 with 9150 fallback
+    signalNewnym()     // SIGNAL NEWNYM via control port (9051/9151)
+    rotateCircuit()    // Rotate: probe, clear agents, NEWNYM
+    getTorIP()         // Fetch current exit IP (fast-fail)
+    showTorIP()        // Print IP information
     getStatus()        // Get circuit status information
 }
 ```
@@ -56,11 +72,16 @@ class TorCircuitManager {
 #### Configuration Object
 ```javascript
 const TOR_CONFIG = {
-    defaultProxy: 'socks5://127.0.0.1:9050',    // Tor SOCKS proxy
+    defaultProxy: 'socks5://127.0.0.1:9050',    // Tor SOCKS proxy (auto-fallback to 9150)
+    socksPort: 9050,                             // Standard Tor SOCKS port
     circuitRotationInterval: 30,                 // Rotation interval
-    maxCircuits: 10,                            // Maximum circuits
-    controlPort: 9051,                          // Tor control port
-    enabled: false                              // Default state
+    maxCircuits: 10,                             // Maximum circuits
+    controlPort: 9051,                           // Tor control port (auto-fallback to 9151)
+    browserSocksPort: 9150,                      // Tor Browser SOCKS fallback
+    browserControlPort: 9151,                    // Tor Browser control fallback
+    timeout: 10000,                              // Connection timeout
+    maxRetries: 3                                // Retry attempts
+};
 };
 ```
 
@@ -120,9 +141,9 @@ node Brahmastra-DDos.js https://target.com 600 32 8 proxy.txt --tor --tor-rotate
 
 ### Circuit Rotation
 ```
-[TOR CIRCUIT] (00:44:45) Rotated to Circuit 2
-[TOR CIRCUIT] (00:45:15) Rotated to Circuit 3
-[TOR CIRCUIT] (00:45:45) Rotated to Circuit 4
+[TOR CIRCUIT] (00:44:45) Rotated to fresh Tor exit circuit (NEWNYM) #2
+[TOR CIRCUIT] (00:45:15) Rotated to fresh Tor exit circuit (NEWNYM) #3
+[TOR CIRCUIT] (00:45:45) Rotated to fresh Tor exit circuit (NEWNYM) #4
 ```
 
 ### Demo Mode with Tor

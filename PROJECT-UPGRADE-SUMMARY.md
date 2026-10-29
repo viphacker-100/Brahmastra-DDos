@@ -3,6 +3,19 @@
 ## 📋 Overview
 This document summarizes the comprehensive upgrade of the Brahmastra-DDos project from version 1.0.0 to version 2.0.0, including all new features, improvements, and architectural enhancements.
 
+## 🛡️ Stability Hardening Update (Latest)
+
+Build on top of v2.0.0:
+
+- **Tor pre-flight check** - refuses to start with `--tor` when the Tor daemon is down, with clear instructions and exit code 1
+- **Real NEWNYM rotation** - control-port based exit circuit rotation with automatic Tor Browser fallbacks (SOCKS 9050/9150, control 9051/9151)
+- **Fast-fail Tor IP check** - ECONNREFUSED aborts in one attempt instead of 9 retries
+- **Silent worker rotation** - only the master logs rotation events (no 6x duplicate warnings)
+- **Arguments hardening** - single-dash flags normalized; standalone `--tor --show-tor-ip` no longer crashes; mirrors runs to `tor-debug.log`
+- **Proxy file validation** - missing/empty files fail cleanly with a descriptive message
+- **WHATWG URL migration** - removed deprecated `url.parse()` usage (DEP0169 warnings gone)
+- **Multiline titles** - the status monitor regex handles `<title>` spanning multiple lines
+
 ## 🆕 Major Version Upgrade: v1.0.0 → v2.0.0
 
 ### 🔧 Core Improvements

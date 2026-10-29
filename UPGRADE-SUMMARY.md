@@ -2,6 +2,16 @@
 
 ## 📋 What Was Accomplished
 
+### 🛡️ Latest Stability Hardening
+- **Tor pre-flight check** with fail-fast behavior and auto-detection (9050/9150 SOCKS, 9051/9151 control)
+- **Real NEWNYM circuit rotation** via the Tor control port, with socket-cycling fallback (single warning, master-only logging)
+- **Fast-fail IP checking** - ECONNREFUSED aborts immediately instead of retrying 9 times
+- **Standalone Tor IP check** - `node Brahmastra-DDos.js --tor --show-tor-ip` runs without attack args (no more crash), logs mirrored to `tor-debug.log`
+- **Robust CLI parsing** - single-dash flag normalization (`-tor`, `-demo`, ...) across all modes
+- **Proxy file validation** - descriptive errors for missing/empty files instead of tracebacks
+- **DEP0169 fixed** - `url.parse()` replaced with the WHATWG `URL` API
+- **Multiline title extraction** in the status monitor
+
 ### 1. ✅ Tor IP Display Functionality
 - **New Flag**: `--show-tor-ip` for displaying current Tor exit node IP
 - **Multiple IP Services**: Redundant checking via httpbin.org, ipify.org, and ipinfo.io
@@ -31,8 +41,8 @@
 
 ### Tor IP Display (`--show-tor-ip`)
 ```bash
-# Standalone IP check
-node Brahmastra-DDos.js https://example.com 5 8 1 proxy.txt --tor --show-tor-ip
+# Standalone IP check (flags only, no attack)
+node Brahmastra-DDos.js --tor --show-tor-ip
 
 # Demo mode with IP display
 node Brahmastra-DDos.js https://example.com 30 16 2 proxy.txt demo --tor --show-tor-ip
